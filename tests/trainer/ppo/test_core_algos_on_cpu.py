@@ -24,12 +24,14 @@ from verl.trainer.ppo.core_algos import (
     compute_gae_advantage_return,
     compute_grpo_outcome_advantage,
     compute_grpo_vectorized_outcome_advantage,
+    compute_policy_loss_geo_mean,
     compute_rloo_outcome_advantage,
     compute_rloo_vectorized_outcome_advantage,
     get_adv_estimator_fn,
     kl_penalty,
     register_adv_est,
 )
+from verl.workers.config import ActorConfig
 
 
 def mock_test_fn():
@@ -359,6 +361,24 @@ def test_kl_penalty_k3_plus_uses_k2_gradient():
     (grad_k2,) = torch.autograd.grad(out_k2, logprob_k2)
 
     assert torch.allclose(grad_plus, grad_k2)
+
+
+def test_geo_mean_policy_loss_excludes_zero_length_sequences():
+    config = ActorConfig(strategy="fsdp", rollout_n=2, ppo_micro_batch_size_per_gpu=2)
+    old_log_prob = torch.zeros(2, 3, dtype=torch.float32)
+    log_prob = torch.zeros(2, 3, dtype=torch.float32)
+    advantages = torch.tensor([[1.0, 1.0, 0.0], [0.0, 0.0, 0.0]], dtype=torch.float32)
+    response_mask = torch.tensor([[1.0, 1.0, 0.0], [0.0, 0.0, 0.0]], dtype=torch.float32)
+
+    pg_loss, _ = compute_policy_loss_geo_mean(
+        old_log_prob=old_log_prob,
+        log_prob=log_prob,
+        advantages=advantages,
+        response_mask=response_mask,
+        config=config,
+    )
+
+    assert torch.isclose(pg_loss, torch.tensor(-1.0))
 
 
 if __name__ == "__main__":
